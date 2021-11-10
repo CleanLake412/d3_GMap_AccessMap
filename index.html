@@ -18,11 +18,11 @@
 
     <script>
         let stations = {}, // {id, name, headsign, line_name, line}
-            links = []; // source, target, travel_mode, distance, duration, num_stops
+            links = {}; // source, target, travel_mode, distance, duration, num_stops
 
         $(document).ready(function(){
 
-            d3.json('data/routes.json').then(function(routes) {
+            d3.json('data/routes-paris-1.json').then(function(routes) {
                 console.log(routes);
                 console.log(analyzeRoutes(routes.routes));
             });
@@ -57,12 +57,11 @@
                 name: arrival
             };
 
-            let prevStationId, newStationId;
-            let linkInfo = null, changeInfo = null;
+            let prevStationId;
+            let linkInfo = null;
             for (i in routes) {
                 route = routes[i];
                 linkInfo = null;
-                changeInfo = null;
 
                 // 距離、所要時間
                 routesInfo[i] = {};
@@ -75,40 +74,8 @@
                 let step, j, stepCount = route.legs[0].steps.length;
                 for (j in route.legs[0].steps) {
                     step = route.legs[0].steps[j];
-                    if (prevStationId !== "departure" &&
-                        (step.distance.value < 100/*meters*/ || step.duration.value < 100/*seconds*/) &&
-                        j < stepCount - 1 // 最後のステップではない
-                    ) {
-                        // 1分以内の経路はスキップ、乗り換えたと判断する
-                        changeInfo = {
-                            ...changeInfo,
-                            distance: step.distance.value,
-                            duration: step.duration.value,
-                            //lineA: {},
-                            //stationA: '',
-                            lineB: {},
-                            stationB: ''
-                        };
-                        continue;
-                    }
 
                     if (step.travel_mode === "WALKING") {
-                        if (j*1 === stepCount - 1) { // 最後のステップ
-
-                            // 到着地を追加
-                            addNewStation(newStationId, {
-                                name: "arrival"
-                            }, {
-                                source: newStationId,
-                                target: "arrival",
-                                travel_mode: "WALKING",
-                                distance: step.distance.value,
-                                duration: step.duration.value
-                            });
-
-                            break;
-                        }
-
                         // 駅まで徒歩で行く場合、駅情報は取得できないため連結情報のみ取得する
                         linkInfo = {
                             source: prevStationId,
@@ -117,23 +84,15 @@
                             duration: step.duration.value
                         };
                     } else if (step.travel_mode === "TRANSIT") {
-                        // 出発駅を追加
-                        if (linkInfo === null) {
-                            console.error("empty linkInfo");
-                            break;
+                        if (linkInfo !== null) {
+                            // 出発駅を追加
+                            prevStationId = addNewStation(prevStationId, {
+                                name: step.transit.departure_stop.name,
+                                headsign: '',
+                                line_name: step.transit.line.name,
+                                line: step.transit.line
+                            }, linkInfo);
                         }
-                        if (changeInfo !== null) {
-                            changeInfo.lineB = step.transit.line;
-                            changeInfo.stationB = step.transit.departure_stop.name;
-                            linkInfo.change = changeInfo;
-                        }
-                        newStationId = addNewStation(prevStationId, {
-                            name: step.transit.departure_stop.name,
-                            headsign: '',
-                            line_name: step.transit.line.name,
-                            line: step.transit.line
-                        }, linkInfo);
-                        prevStationId = newStationId;
 
                         // 到着駅
                         linkInfo = {
@@ -143,23 +102,15 @@
                             duration: step.duration.value,
                             num_stops: step.transit.num_stops
                         };
-                        if (j*1 === stepCount - 2) { // 最後の公共交通
-                            // 最後の駅を追加
-                            newStationId = addNewStation(prevStationId, {
-                                name: step.transit.arrival_stop.name,
-                                headsign: step.transit.headsign,
-                                line_name: step.transit.line.name,
-                                line: step.transit.line
-                            }, linkInfo);
-                            prevStationId = newStationId;
-                        } else {
-                            // 乗り換え情報
-                            changeInfo = {
-                                headsign: step.transit.headsign,
-                                lineA: step.transit.line,
-                                stationA: step.transit.arrival_stop.name
-                            };
-                        }
+
+                        // 最後の駅を追加
+                        prevStationId = addNewStation(prevStationId, {
+                            name: step.transit.arrival_stop.name,
+                            headsign: step.transit.headsign,
+                            line_name: step.transit.line.name,
+                            line: step.transit.line
+                        }, linkInfo);
+                        linkInfo = null;
                     }
                 } // end of for steps of route
             } // end of for routes
@@ -167,7 +118,7 @@
             return {
                 departure, arrival,
                 routes: routesInfo,
-                spots: stations, links
+                nodes: stations, links: Object.values(links)
             };
         }
 
@@ -180,16 +131,21 @@
          * @return string 新規駅のID
          */
         function addNewStation(prevStation, newStationInfo, linkInfo) {
-            let newStationId = newStationInfo.name;
+            let newStationId = newStationInfo.name + "||" + newStationInfo.line_name;
             if (!(newStationId in stations)) {
                 newStationInfo.id = newStationId;
                 stations[newStationId] = newStationInfo;
             }
 
-            linkInfo.source = prevStation;
-            linkInfo.target = newStationId;
-            links.push(linkInfo);
-
+            let linkId = prevStation + '::' + newStationId;
+            if (linkId in links) {
+                links[linkId].weight ++;
+            } else {
+                linkInfo.source = prevStation;
+                linkInfo.target = newStationId;
+                linkInfo.weight = 1;
+                links[linkId] = linkInfo;
+            }
             return newStationId;
         }
 
