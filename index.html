@@ -22,7 +22,7 @@
 
         $(document).ready(function(){
 
-            d3.json('data/routes-paris-1.json').then(function(routes) {
+            d3.json('data/routes.json').then(function(routes) {
                 console.log(routes);
                 let routeData = analyzeRoutes(routes.routes);
                 console.log(routeData);
@@ -33,51 +33,68 @@
 
         function renderAccessMap(data) {
 
-            const width = 1280, height = 800;
+            const svgWidth = 1000, svgHeight = 600;
+            const marginX = 50, marginY = 50;
+
             const svg = d3.select("#access-map")
                 .attr("cursor", "default")
-                .attr("width", width)
-                .attr("height", height)
-                .attr("viewBox", [-width / 2, -height / 2, width, height]);
+                .attr("width", svgWidth + marginX*2)
+                .attr("height", svgHeight + marginY*2)
+                .attr("viewBox", [-marginX, -marginY, svgWidth + marginX*2, svgHeight + marginY*2]);
 
-            const links = data.links.map(d => Object.create(d));
-            const nodes = data.nodes.map(d => Object.create(d));
-
-            const simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(links).id(d => d.id))
-                .force("charge", d3.forceManyBody().strength(-300))
-                .force("x", d3.forceX())
-                .force("y", d3.forceY())
-                .force('collide', d3.forceCollide(d => 65));
+            const links = data.links;//.map(d => Object.create(d));
+            const nodes = data.nodes;//.map(d => Object.create(d));
 
             const types = ["WALKING", "TRANSIT"];
             const color = d3.scaleOrdinal(types, d3.schemeCategory10);
             const linkArc = d =>`M${d.source.x},${d.source.y}A0,0 0 0,1 ${d.target.x},${d.target.y}`;
 
-            const drag = simulation => {
+            let nodeWidth = 60, nodeHeight = 120, nodeMarginX = 30, nodeMarginY = 30;
 
-                function dragstarted(event, d) {
-                    if (!event.active) simulation.alphaTarget(0.3).restart();
-                    d.fx = d.x;
-                    d.fy = d.y;
+            // Node x, y, height
+            let nodesById = {}, nodeMaxIdx = 0, nodeMaxRoute = 0;
+            nodes.map(d => {
+                nodesById[d.id] = d;
+                if (d.x) { // 1 ~
+                    nodeMaxIdx = Math.max(nodeMaxIdx, d.x);
                 }
-
-                function dragged(event, d) {
-                    d.fx = event.x;
-                    d.fy = event.y;
+                if (d.y) { // 0 ~
+                    nodeMaxRoute = Math.max(nodeMaxRoute, d.y);
                 }
-
-                function dragended(event, d) {
-                    if (!event.active) simulation.alphaTarget(0);
-                    d.fx = null;
-                    d.fy = null;
+            });
+            nodeMarginX = Math.floor(((svgWidth - nodeWidth * (nodeMaxIdx+2)) / (nodeMaxIdx+1)));
+            if (nodeMaxRoute > 0) {
+                nodeMarginY = Math.floor(((svgHeight - nodeHeight * (nodeMaxRoute+1)) / nodeMaxRoute));
+            } else {
+                nodeMarginY = 0;
+            }
+            links.map(d => {
+                d.source = nodesById[d.source];
+                d.target = nodesById[d.target];
+                d.source.s_weight = d.source.s_weight ? d.source.s_weight + d.weight : d.weight;
+                d.target.t_weight = d.target.t_weight ? d.target.t_weight + d.weight : d.weight;
+            });
+            nodes.map(d => {
+                let x, y;
+                let h, nodeWeight;
+                if (d.id === 'departure') {
+                    x = 0;
+                    y = 0;
+                    h = svgHeight;
+                } else if (d.id === 'arrival') {
+                    x = svgWidth - nodeWidth;
+                    y = 0;
+                    h = svgHeight;
+                } else {
+                    x = d.x * (nodeWidth + nodeMarginX);
+                    y = d.y * (nodeHeight + nodeMarginY);
+                    nodeWeight = Math.max(d.s_weight, d.t_weight);
+                    h = nodeHeight * nodeWeight + nodeMarginY * (nodeWeight-1);
                 }
-
-                return d3.drag()
-                    .on("start", dragstarted)
-                    .on("drag", dragged)
-                    .on("end", dragended);
-            };
+                d.x = x;
+                d.y = y;
+                d.h = h;
+            });console.log(links);
 
             // Per-type markers, as they don't inherit styles.
             svg.append("defs").selectAll("marker")
@@ -101,7 +118,18 @@
                 .data(links)
                 .join("path")
                 .attr("stroke", d => color(d.travel_mode))
-                .attr("marker-end", d => `url(${new URL(`#arrow-${d.travel_mode}`, location)})`);
+                .attr("marker-end", d => `url(${new URL(`#arrow-${d.travel_mode}`, location)})`)
+                .attr("d", d => {
+                    let x1 = d.source.x + nodeWidth;
+                    let x2 = d.target.x;
+                    let y;
+                    if (d.source.h > d.target.h) {
+                        y = d.target.y + d.target.h / 2;
+                    } else {
+                        y = d.source.y + d.source.h / 2;
+                    }
+                    return `M ${x1} ${y} l ${x2-x1} 0`;
+                });
 
             const node = svg.append("g")
                 .attr("fill", "currentColor")
@@ -110,32 +138,30 @@
                 .selectAll("g")
                 .data(nodes)
                 .join("g")
-                .call(drag(simulation));
+                .attr("transform", d => `translate(${d.x}, ${d.y})`);
 
-            node.append("circle")
+            node.append("rect")
                 .attr("stroke", "white")
                 .attr("stroke-width", 1.5)
-                .attr("r", 25)
+                .attr("width", nodeWidth)
+                .attr("height", d => d.h)
                 .attr('fill', d => '#6baed6');
 
             node.append("text")
-                .attr("x", 30 + 4)
-                .attr("y", "0.31em")
-                .text(d => d.id)
-                .clone(true).lower()
-                .attr("fill", "none")
+                .attr("x", 10)
+                .attr("y", -25)
+                //.attr("x", 30 + 4)
+                //.attr("y", "0.31em")
+                .attr("transform", "rotate(90)")
                 .attr("stroke", "white")
-                .attr("stroke-width", 3);
+                .attr("stroke-width", 3)
+                .text(d => d.name)
+                .clone(true)//.lower()
+                .attr("fill", "none")
+                .attr("stroke", "black")
+                .attr("stroke-width", 1);
 
             node.on('dblclick', (e, d) => console.log(nodes[d.index]));
-
-
-            simulation.on("tick", () => {
-                link.attr("d", linkArc);
-                node.attr("transform", d => `translate(${d.x},${d.y})`);
-            });
-
-            //invalidation.then(() => simulation.stop());
 
         }
 
@@ -158,10 +184,11 @@
             };
 
             let prevStationId;
-            let linkInfo = null;
+            let linkInfo = null, stationIdx;
             for (i in routes) {
                 route = routes[i];
                 linkInfo = null;
+                stationIdx = 0;
 
                 // 距離、所要時間
                 routesInfo[i] = {};
@@ -190,12 +217,13 @@
                     } else if (step.travel_mode === "TRANSIT") {
                         if (linkInfo !== null) {
                             // 出発駅を追加
+                            stationIdx ++;
                             prevStationId = addNewStation(prevStationId, {
                                 name: step.transit.departure_stop.name,
                                 headsign: '',
                                 line_name: step.transit.line.name,
                                 line: step.transit.line
-                            }, linkInfo);
+                            }, linkInfo, i, stationIdx);
                         }
 
                         // 到着駅
@@ -208,12 +236,13 @@
                         };
 
                         // 最後の駅を追加
+                        stationIdx ++;
                         prevStationId = addNewStation(prevStationId, {
                             name: step.transit.arrival_stop.name,
                             headsign: step.transit.headsign,
                             line_name: step.transit.line.name,
                             line: step.transit.line
-                        }, linkInfo);
+                        }, linkInfo, i, stationIdx);
                         linkInfo = null;
                     }
                 } // end of for steps of route
@@ -232,12 +261,16 @@
          * @param prevStation string
          * @param newStationInfo object
          * @param linkInfo object
+         * @param routeIdx
+         * @param stepIdx
          * @return string 新規駅のID
          */
-        function addNewStation(prevStation, newStationInfo, linkInfo) {
+        function addNewStation(prevStation, newStationInfo, linkInfo, routeIdx, stepIdx) {
             let newStationId = newStationInfo.id ? newStationInfo.id :  newStationInfo.name + "||" + newStationInfo.line_name;
             if (!(newStationId in stations)) {
                 newStationInfo.id = newStationId;
+                newStationInfo.x = stepIdx;
+                newStationInfo.y = routeIdx;
                 stations[newStationId] = newStationInfo;
             }
 
