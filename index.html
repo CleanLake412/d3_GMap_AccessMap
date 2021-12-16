@@ -22,25 +22,27 @@
 
         $(document).ready(function(){
 
-            d3.json('data/routes.json').then(function(routes) {
+            d3.json('data/routes-paris-1.json').then(function(routes) {
                 console.log(routes);
                 let routeData = analyzeRoutes(routes.routes);
                 console.log(routeData);
-                renderAccessMap(routeData);
+                renderAccessMap("#access-map", routeData);
             });
 
         });
 
-        function renderAccessMap(data) {
+        function renderAccessMap(container, data) {
 
             const svgWidth = 1000, svgHeight = 600;
             const marginX = 50, marginY = 50;
+            const scale = 1;
 
-            const svg = d3.select("#access-map")
+            const svg = d3.select(container)
                 .attr("cursor", "default")
                 .attr("width", svgWidth + marginX*2)
                 .attr("height", svgHeight + marginY*2)
-                .attr("viewBox", [-marginX, -marginY, svgWidth + marginX*2, svgHeight + marginY*2]);
+                .attr("viewBox", [-marginX/scale, -marginY/scale, (svgWidth + marginX*2)/scale, (svgHeight + marginY*2)/scale]);
+            svg.select("*").remove();
 
             const links = data.links;//.map(d => Object.create(d));
             const nodes = data.nodes;//.map(d => Object.create(d));
@@ -102,7 +104,7 @@
                 .join("marker")
                 .attr("id", d => `arrow-${d}`)
                 .attr("viewBox", "0 -5 10 10")
-                .attr("refX", 38)
+                .attr("refX", 10)
                 .attr("refY", 0)
                 .attr("markerWidth", 6)
                 .attr("markerHeight", 6)
@@ -141,7 +143,7 @@
                 .attr("transform", d => `translate(${d.x}, ${d.y})`);
 
             node.append("rect")
-                .attr("stroke", "white")
+                .attr("stroke", "green")
                 .attr("stroke-width", 1.5)
                 .attr("width", nodeWidth)
                 .attr("height", d => d.h)
