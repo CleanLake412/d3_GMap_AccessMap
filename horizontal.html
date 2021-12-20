@@ -22,26 +22,18 @@
 
         $(document).ready(function(){
 
-            Promise.all([
-                d3.json('data/routes-paris-1.json'),
-                d3.json('data/routes-paris-2.json'),
-                d3.json('data/routes-paris-3.json')
-            ]).then((data) => {
-                console.log(data);
-                let routes = [
-                    data[0].routes[0],
-                    data[1].routes[0],
-                    data[2].routes[0]
-                ];
-                let routeData = analyzeRoutes(routes);
+            d3.json('data/routes-paris-1.json').then(function(routes) {
+                console.log(routes);
+                let routeData = analyzeRoutes(routes.routes);
                 console.log(routeData);
                 renderAccessMap("#access-map", routeData);
             });
+
         });
 
         function renderAccessMap(container, data) {
 
-            const svgWidth = 600, svgHeight = 800;
+            const svgWidth = 1000, svgHeight = 600;
             const marginX = 50, marginY = 50;
             const scale = 1;
 
@@ -59,25 +51,25 @@
             const color = d3.scaleOrdinal(types, d3.schemeCategory10);
             const linkArc = d =>`M${d.source.x},${d.source.y}A0,0 0 0,1 ${d.target.x},${d.target.y}`;
 
-            let nodeWidth = 120, nodeHeight = 60, nodeMarginX = 30, nodeMarginY = 30;
+            let nodeWidth = 60, nodeHeight = 120, nodeMarginX = 30, nodeMarginY = 30;
 
-            // Node x, y, width
+            // Node x, y, height
             let nodesById = {}, nodeMaxIdx = 0, nodeMaxRoute = 0;
             nodes.map(d => {
                 nodesById[d.id] = d;
                 if (d.x) { // 1 ~
-                    nodeMaxRoute = Math.max(nodeMaxRoute, d.x);
+                    nodeMaxIdx = Math.max(nodeMaxIdx, d.x);
                 }
                 if (d.y) { // 0 ~
-                    nodeMaxIdx = Math.max(nodeMaxIdx, d.y);
+                    nodeMaxRoute = Math.max(nodeMaxRoute, d.y);
                 }
             });
+            nodeMarginX = Math.floor(((svgWidth - nodeWidth * (nodeMaxIdx+2)) / (nodeMaxIdx+1)));
             if (nodeMaxRoute > 0) {
-                nodeMarginX = Math.floor(((svgWidth - nodeWidth * (nodeMaxRoute+1)) / nodeMaxRoute));
+                nodeMarginY = Math.floor(((svgHeight - nodeHeight * (nodeMaxRoute+1)) / nodeMaxRoute));
             } else {
-                nodeMarginX = 0;
+                nodeMarginY = 0;
             }
-            nodeMarginY = Math.floor(((svgHeight - nodeHeight * (nodeMaxIdx+2)) / (nodeMaxIdx+1)));
             links.map(d => {
                 d.source = nodesById[d.source];
                 d.target = nodesById[d.target];
@@ -86,25 +78,25 @@
             });
             nodes.map(d => {
                 let x, y;
-                let w, nodeWeight;
+                let h, nodeWeight;
                 if (d.id === 'departure') {
                     x = 0;
                     y = 0;
-                    w = svgWidth;
+                    h = svgHeight;
                 } else if (d.id === 'arrival') {
-                    x = 0;
-                    y = svgHeight - nodeHeight;
-                    w = svgWidth;
+                    x = svgWidth - nodeWidth;
+                    y = 0;
+                    h = svgHeight;
                 } else {
                     x = d.x * (nodeWidth + nodeMarginX);
                     y = d.y * (nodeHeight + nodeMarginY);
-                    nodeWeight = Math.max(d.s_weight??0, d.t_weight??0);
-                    w = nodeWidth * nodeWeight + nodeMarginX * (nodeWeight-1);
+                    nodeWeight = Math.max(d.s_weight, d.t_weight);
+                    h = nodeHeight * nodeWeight + nodeMarginY * (nodeWeight-1);
                 }
                 d.x = x;
                 d.y = y;
-                d.w = w;
-            });
+                d.h = h;
+            });console.log(links);
 
             // Per-type markers, as they don't inherit styles.
             svg.append("defs").selectAll("marker")
@@ -130,11 +122,15 @@
                 .attr("stroke", d => color(d.travel_mode))
                 .attr("marker-end", d => `url(${new URL(`#arrow-${d.travel_mode}`, location)})`)
                 .attr("d", d => {
-                    let x1 = Math.max(d.source.x, d.target.x);
-                    let x2 = Math.min(d.source.x + d.source.w, d.target.x + d.target.w);
-                    let y1 = d.source.y + nodeHeight;
-                    let y2 = d.target.y;
-                    return `M ${x1+(x2-x1)/2} ${y1} l 0 ${y2-y1}`;
+                    let x1 = d.source.x + nodeWidth;
+                    let x2 = d.target.x;
+                    let y;
+                    if (d.source.h > d.target.h) {
+                        y = d.target.y + d.target.h / 2;
+                    } else {
+                        y = d.source.y + d.source.h / 2;
+                    }
+                    return `M ${x1} ${y} l ${x2-x1} 0`;
                 });
 
             const node = svg.append("g")
@@ -147,19 +143,18 @@
                 .attr("transform", d => `translate(${d.x}, ${d.y})`);
 
             node.append("rect")
-                .attr("stroke", "#707070")
+                .attr("stroke", "green")
                 .attr("stroke-width", 1.5)
-                .attr("width", d => d.w)
-                .attr("height", nodeHeight)
-                .attr("rx", 15)
-                .attr('fill', 'white');
+                .attr("width", nodeWidth)
+                .attr("height", d => d.h)
+                .attr('fill', d => '#6baed6');
 
             node.append("text")
                 .attr("x", 10)
-                .attr("y", 20)
+                .attr("y", -25)
                 //.attr("x", 30 + 4)
                 //.attr("y", "0.31em")
-                //.attr("transform", "rotate(90)")
+                .attr("transform", "rotate(90)")
                 .attr("stroke", "white")
                 .attr("stroke-width", 3)
                 .text(d => d.name)
@@ -172,32 +167,24 @@
 
         }
 
-        /**
-         * 到着地が同一する複数のルートを分析する
-         * （アクセス図用）
-         * ルート１：　出発地１（徒歩）→駅１→駅２（徒歩）→駅２’→駅３（徒歩）→駅３’（徒歩）→到着地
-         * ルート２：　出発地２（徒歩）→駅１→駅２（徒歩）→駅２’→駅３（徒歩）→駅３’（徒歩）→到着地
-         * ルート３：　出発地３（徒歩）→駅１→駅２（徒歩）→駅２’→駅３（徒歩）→駅３’（徒歩）→到着地
-         *
-         * @param {array} routes ユーザーが選択したルート（複数）
-         * @return {object}
-         */
         function analyzeRoutes(routes) {
             // 出発地、目的地の名前
             let departure = routes[0].legs[0].start_address;
             let arrival = routes[0].legs[0].end_address;
 
             // ルート基本情報
-            let routesInfo = [];
+            let routesInfo = [], route, i;
 
-            // 駅、リンクを初期化する
-            stations = {};
+            // 駅、リンク
+            stations['departure'] = {
+                id: "departure",
+                name: departure
+            };
             stations['arrival'] = {
                 id: "arrival",
                 name: arrival
             };
 
-            let route, i;
             let prevStationId;
             let linkInfo = null, stationIdx;
             for (i in routes) {
@@ -211,18 +198,11 @@
                 routesInfo[i].duration = route.legs[0].duration.value;
 
                 // Steps分析
+                prevStationId = "departure";
+
                 let step, j, stepCount = route.legs[0].steps.length;
-                prevStationId = null;
                 for (j in route.legs[0].steps) {
                     step = route.legs[0].steps[j];
-
-                    if (j*1 === 0) {
-                        // 出発地
-                        prevStationId = addNewStation(prevStationId, {
-                            id: departure,
-                            name: departure
-                        }, null, i, 0);
-                    }
 
                     if (step.travel_mode === "WALKING") {
                         // 駅まで徒歩で行く場合、駅情報は取得できないため連結情報のみ取得する
@@ -291,13 +271,9 @@
             let newStationId = newStationInfo.id ? newStationInfo.id :  newStationInfo.name + "||" + newStationInfo.line_name;
             if (!(newStationId in stations)) {
                 newStationInfo.id = newStationId;
-                newStationInfo.x = routeIdx;
-                newStationInfo.y = stepIdx;
+                newStationInfo.x = stepIdx;
+                newStationInfo.y = routeIdx;
                 stations[newStationId] = newStationInfo;
-            }
-
-            if (prevStation === null || linkInfo === null) {
-                return newStationId;
             }
 
             let linkId = prevStation + '::' + newStationId;
