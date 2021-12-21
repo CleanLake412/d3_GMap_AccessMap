@@ -155,18 +155,21 @@
                 .attr('fill', 'white');
 
             node.append("text")
-                .attr("x", 10)
-                .attr("y", 20)
-                //.attr("x", 30 + 4)
-                //.attr("y", "0.31em")
-                //.attr("transform", "rotate(90)")
-                .attr("stroke", "white")
-                .attr("stroke-width", 3)
-                .text(d => d.name)
-                .clone(true)//.lower()
-                .attr("fill", "none")
-                .attr("stroke", "black")
-                .attr("stroke-width", 1);
+                //.attr("x", 10)
+                //.attr("y", 20)
+                .attr("text-anchor", "middle")
+                .attr("font-size", 14)
+                .attr("transform", d => `translate(${d.w / 2}, ${nodeHeight / 2})`)
+                .selectAll("tspan")
+                .data(d => {
+                    let lines = splitString(d.name, svg, 15, d.w * 0.9);
+                    //console.log(lines);
+                    return lines;
+                })
+                .join("tspan")
+                .attr("x", 0)
+                .attr("y", (d,i,e) => ((i+1-e.length/2)*1.2-0.2) + "em")
+                .text(d => d);
 
             node.on('dblclick', (e, d) => console.log(nodes[d.index]));
 
@@ -184,8 +187,8 @@
          */
         function analyzeRoutes(routes) {
             // 出発地、目的地の名前
-            let departure = routes[0].legs[0].start_address;
-            let arrival = routes[0].legs[0].end_address;
+            let departure;
+            let arrival = routes[0].legs[0].end_address; // すべてのルートで到着地は同一
 
             // ルート基本情報
             let routesInfo = [];
@@ -200,21 +203,26 @@
             let route, i;
             let prevStationId;
             let linkInfo = null, stationIdx;
+
             for (i in routes) {
-                route = routes[i];
+                route = routes[i].legs[0];
                 linkInfo = null;
                 stationIdx = 0;
 
+                // 出発地、目的地の名前
+                departure = route.start_address;
+                arrival = route.end_address;
+
                 // 距離、所要時間
                 routesInfo[i] = {};
-                routesInfo[i].distance = route.legs[0].distance.value;
-                routesInfo[i].duration = route.legs[0].duration.value;
+                routesInfo[i].distance = route.distance.value;
+                routesInfo[i].duration = route.duration.value;
 
                 // Steps分析
-                let step, j, stepCount = route.legs[0].steps.length;
+                let step, j, stepCount = route.steps.length;
                 prevStationId = null;
-                for (j in route.legs[0].steps) {
-                    step = route.legs[0].steps[j];
+                for (j in route.steps) {
+                    step = route.steps[j];
 
                     if (j*1 === 0) {
                         // 出発地
@@ -271,7 +279,6 @@
             } // end of for routes
 
             return {
-                departure, arrival,
                 routes: routesInfo,
                 nodes: Object.values(stations), links: Object.values(links)
             };
@@ -312,6 +319,68 @@
             return newStationId;
         }
 
+        function splitString(val, container, fontSize, boxWidth) {
+
+            val = _removeDoubleSpace(val);
+            let bbox = _getTextBBox(val, container, fontSize);
+            if (bbox.width < boxWidth) {
+                return [val];
+            }
+
+            let lines = [];
+            let linesBySpaces = val.split(" ");
+            if (linesBySpaces.length === 1) {
+                return [val];
+            }
+
+            let lineWidth = 0, line = "";
+            let charWidth = bbox.width / val.length;//console.log(val, charWidth, bbox);
+            linesBySpaces.forEach(l => {
+                let wordWidth = (line.length > 0 ? l.length + 1 : l.length) * charWidth;
+                if (l.length * charWidth >= boxWidth) {
+                    if (line.length > 0) {
+                        lines.push(line);
+                    }
+                    lines.push(l);
+                    lineWidth = 0;
+                    line = "";
+                } else if (lineWidth + wordWidth >= boxWidth) {
+                    lines.push(line);
+                    lineWidth = wordWidth;
+                    line = l;
+                } else {
+                    lineWidth += wordWidth;
+                    line = line + (line.length > 0 ? " " : "") + l;
+                }
+            });
+            if (line.length > 0) {
+                lines.push(line);
+            }
+
+            return lines;
+        }
+
+        function _removeDoubleSpace(val) {
+            let pieces = val.split(" ");
+            let validPieces = [];
+            pieces.forEach(p => {
+                p.length > 0 && validPieces.push(p);
+            });
+            return validPieces.join(" ");
+        }
+
+        function _getTextBBox(val, container, fontSize) {
+            let text;
+            try {
+                text = container
+                    .append("text")
+                    .attr("font-size", fontSize)
+                    .text(val);
+                return text.node().getBBox();
+            } finally {
+                if (text) text.remove();
+            }
+        }
     </script>
 </body>
 </html>
